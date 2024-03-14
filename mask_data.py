@@ -16,12 +16,9 @@ bert_mlm = BertForMaskedLM.from_pretrained(model_name)
 bert_mlm = bert_mlm.cuda()
 
 # 手法１：単語難易度辞書を使って動的にマスクする
-# 1. 文全体のうち15%がマスクされるようにする
-# 2. マスクした部分がない場合、破棄する：return None
 def mask_simp_word(simp):
     surface_simp, base_simp = tokenize(simp)
     count = 0
-    # マスク可能な単語数(中級または初級)を数える
     for base in base_simp:
         if base in word2complexity:
             if word2complexity[base] == "中級" or word2complexity[base] == "初級":
@@ -29,10 +26,8 @@ def mask_simp_word(simp):
     if count == 0:
         return None
     
-    # 全体の15%がマスクされるように、マスク確率を調整する
     mask_proba = (len(base_simp)/count) * 0.15
 
-    # マスク確率の重みは中級で0.75、初級で1.0にしている
     for idx, base in enumerate(base_simp):
         if base in word2complexity:
             if word2complexity[base] == "中級":
@@ -48,20 +43,15 @@ def mask_simp_word(simp):
 
 
 # 手法２：平易な単語言い換え辞書を使って複雑な単語を平易な単語に置き換えて、マスクする
-# 1. 通常文の複雑な単語を平易な単語に置き換える
-# 2. 複数の言い換え候補がある場合、BERTの穴埋め確率が一番高いやつにする
-# 3. 平易な単語をマスクして、マスクする前の文と一緒に返す：return masked_comp, replaced_comp
 def replace_comp_word(comp):
     surface_comp, base_comp = tokenize(comp)
     count = 0
-    # マスク可能な単語数を数える
     for base in base_comp:
         if base in word2simple:
             count = count + 1
     if count == 0:
         return None, None
     
-    # 全体の15%がマスクされるように、マスク確率を調整する
     mask_proba = (len(base_comp)/count) * 0.15
 
     replaced_comp = surface_comp.copy()
@@ -69,9 +59,9 @@ def replace_comp_word(comp):
     for idx, base in enumerate(base_comp):
         if base in word2simple:
             tmp = surface_comp.copy()
-            tmp[idx] = "[MASK]" # HUggingfaceのBERTはこの形のマスクトークン
-            mask_word = mask_predict("".join(tmp), word2simple[base]) # 言い換え先を決定
-            if mask_word != None and random.random() < mask_proba: # 全体の15%がマスクされるようにする
+            tmp[idx] = "[MASK]"
+            mask_word = mask_predict("".join(tmp), word2simple[base])
+            if mask_word != None and random.random() < mask_proba:
                     replaced_comp[idx] = mask_word
                     masked_comp[idx] = "<MASK>"
     if "<MASK>" in masked_comp:
@@ -110,7 +100,6 @@ def mask_predict(text, words, tokenizer=bert_tokenizer, bert_mlm=bert_mlm):
         return tokenizer.convert_ids_to_tokens(top_word_id)
     
 
-# Mecabで形態素解析して、表層系の文と基本形の文をする
 def tokenize(text):
     text = tokenizer.parse(text.strip())
     text = text.split("\n")
@@ -121,7 +110,7 @@ def tokenize(text):
         pos = seg[1].split(",")
         surface.append(seg[0])
         base.append(pos[6])
-    return surface, base # 表層系の文と基本形の文の両方を返す
+    return surface, base
 
 
 # 原文と置き換え後の文の類似度を測定
@@ -164,11 +153,7 @@ if __name__ == '__main__':
         f = f.read().splitlines()
         for line in f:
             line = line.split("\t")
-            #コサイン類似度Cが閾値より大きい言い換えを抽出
             if float(line[3]) > threshold:
-                word2simple.setdefault(line[0], []).append(line[1]) # 言い換え候補が複数存在する場合がある
+                word2simple.setdefault(line[0], []).append(line[1])
 
     mask_data(args[1], args[2])
-
-# python3 mask_data.py ../raw_corpus/SNOW/train.src ../raw_corpus/SNOW/train.tgt
-# python3 mask_data.py ../raw_corpus/MAISHO/maisho2022_sent_v2.txt ../raw_corpus/MAISHO/maisho2022_sent_v2.txt
